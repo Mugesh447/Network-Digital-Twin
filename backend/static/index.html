@@ -1,0 +1,1202 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Digital Twin - Virtual Infrastructure Simulator & Telemetry Engine</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0f7ff',
+                            500: '#0066ff',
+                            600: '#0052cc',
+                            900: '#001a4d',
+                        },
+                        cyber: {
+                            dark: '#0a0e17',
+                            card: '#121824',
+                            border: '#1e293b',
+                            accent: '#00f2fe',
+                            pink: '#4facfe'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- React & Babel CDNs -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- FontAwesome Icons CDN -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #080c14;
+            color: #f1f5f9;
+            overflow-x: hidden;
+        }
+
+        .code-font {
+            font-family: 'Fira Code', monospace;
+        }
+
+        /* Glassmorphism utility */
+        .glass-panel {
+            background: rgba(18, 24, 38, 0.75);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .glass-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        /* Glowing Pulse Animations */
+        @keyframes pulse-cyan {
+            0%, 100% { filter: drop-shadow(0 0 6px rgba(0, 242, 254, 0.7)); }
+            50% { filter: drop-shadow(0 0 15px rgba(0, 242, 254, 1)); }
+        }
+
+        @keyframes pulse-red {
+            0%, 100% { filter: drop-shadow(0 0 6px rgba(239, 68, 68, 0.7)); }
+            50% { filter: drop-shadow(0 0 18px rgba(239, 68, 68, 1)); }
+        }
+
+        .glow-active { animation: pulse-cyan 2.5s infinite; }
+        .glow-failed { animation: pulse-red 1.2s infinite; }
+
+        /* Custom Scrollbars */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0a0e17;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #1e293b;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #334155;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <!-- Main React Application Script -->
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // Mock topology generator (used when backend /api/topology is unavailable)
+        function generateMockTopology() {
+            const nodes = [];
+            for (let i = 1; i <= 6; i++) {
+                nodes.push({
+                    id: `n${i}`,
+                    name: `R${i}`,
+                    type: i % 3 === 0 ? 'switch' : 'router',
+                    ip: `10.0.0.${i}`,
+                    x: 100 + (i * 120) % 900,
+                    y: 100 + ((i * 80) % 400),
+                    status: 'active',
+                    cpu_load: Math.round(20 + Math.random() * 60),
+                    ram_load: Math.round(15 + Math.random() * 70),
+                    routing_table: []
+                });
+            }
+
+            const links = [];
+            for (let i = 0; i < nodes.length - 1; i++) {
+                links.push({ id: `l${i + 1}`, source: nodes[i].id, target: nodes[i + 1].id, latency: Math.round(1 + Math.random() * 40), utilization: Math.round(Math.random() * 80), status: 'up', loss: 0, throughput: Math.round(100 + Math.random() * 900) });
+            }
+
+            return {
+                nodes,
+                links,
+                incidents: [],
+                summary: {
+                    total_nodes: nodes.length,
+                    total_links: links.length,
+                    active_nodes: nodes.length,
+                    failed_nodes: 0,
+                    health_score: 95,
+                    drift_percentage: 0,
+                    avg_latency: Math.round(links.reduce((s,l)=>s+l.latency,0)/links.length),
+                    total_throughput_gbps: (links.reduce((s,l)=>s+l.throughput,0)/1000).toFixed(2)
+                }
+            };
+        }
+
+        function App() {
+            const [topology, setTopology] = useState({ nodes: [], links: [], summary: {}, incidents: [] });
+            const [selectedNode, setSelectedNode] = useState(null);
+            const [selectedLink, setSelectedLink] = useState(null);
+            const [activeTab, setActiveTab] = useState('inspector'); // inspector, cli, simulator, telemetry, twin, ai, config
+            const [template, setTemplate] = useState('enterprise_campus');
+            const [twinMode, setTwinMode] = useState('LIVE_SYNC');
+            const [aiDiagnostics, setAiDiagnostics] = useState(null);
+            const [isAiModalOpen, setIsAiModalOpen] = useState(false);
+            const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
+            const [generatedConfig, setGeneratedConfig] = useState('');
+            const [pathFinder, setPathFinder] = useState({ source: '', target: '', result: null });
+            const [cliHistory, setCliHistory] = useState([
+                { text: "Cisco IOS Software, Digital Twin Emulator v15.4", type: "system" },
+                { text: "Type 'help' or 'show ip route' to begin.", type: "system" }
+            ]);
+            const [cliInput, setCliInput] = useState('');
+
+            // Metrics history for charts
+            const [metricsHistory, setMetricsHistory] = useState({ cpu: [], ram: [], ts: [] });
+
+            // Fetch topology periodically (fallback to mock data)
+            const fetchTopology = async () => {
+                let data = null;
+                try {
+                    const res = await fetch('/api/topology');
+                    if (!res.ok) throw new Error('non-OK');
+                    data = await res.json();
+                } catch (err) {
+                    console.warn('Using mock topology data (backend unavailable)');
+                    data = generateMockTopology();
+                }
+
+                setTopology(data);
+                if (selectedNode) {
+                    const updated = data.nodes.find(n => n.id === selectedNode.id);
+                    if (updated) setSelectedNode(updated);
+                }
+
+                // Update metrics history (average across nodes)
+                try {
+                    const avgCpu = Math.round((data.nodes.reduce((s,n)=>s+(n.cpu_load||0),0) / Math.max(1,data.nodes.length)));
+                    const avgRam = Math.round((data.nodes.reduce((s,n)=>s+(n.ram_load||0),0) / Math.max(1,data.nodes.length)));
+                    const now = new Date().toLocaleTimeString();
+                    setMetricsHistory(prev => {
+                        const cpu = [...prev.cpu, avgCpu].slice(-60);
+                        const ram = [...prev.ram, avgRam].slice(-60);
+                        const ts = [...prev.ts, now].slice(-60);
+                        return { cpu, ram, ts };
+                    });
+                } catch (e) {
+                    // ignore
+                }
+            };
+
+            useEffect(() => {
+                fetchTopology();
+                const timer = setInterval(fetchTopology, 2000);
+                return () => clearInterval(timer);
+            }, [selectedNode?.id]);
+
+            // Template Switch
+            const handleTemplateChange = async (e) => {
+                const newTpl = e.target.value;
+                setTemplate(newTpl);
+                await fetch('/api/topology/template', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ template: newTpl })
+                });
+                setSelectedNode(null);
+                setSelectedLink(null);
+                fetchTopology();
+            };
+
+            // Trigger Failure
+            const triggerFailure = async (type, targetId, intensity = 1.0) => {
+                await fetch('/api/simulate/failure', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type, target_id: targetId, intensity })
+                });
+                fetchTopology();
+            };
+
+            // Heal All
+            const healAll = async () => {
+                await fetch('/api/simulate/heal', { method: 'POST' });
+                fetchTopology();
+            };
+
+            // Calculate Path
+            const runPathFinder = async () => {
+                if (!pathFinder.source || !pathFinder.target) return;
+                const res = await fetch('/api/simulate/path', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ source: pathFinder.source, target: pathFinder.target })
+                });
+                const data = await res.json();
+                setPathFinder(prev => ({ ...prev, result: data }));
+            };
+
+            // Run CLI command
+            const handleCliSubmit = async (e) => {
+                e.preventDefault();
+                if (!cliInput.trim()) return;
+
+                const cmd = cliInput.trim();
+                const nodeContext = selectedNode ? selectedNode.id : (topology.nodes[0]?.id || 'r1');
+
+                setCliHistory(prev => [...prev, { text: `${selectedNode ? selectedNode.name : 'Device'}# ${cmd}`, type: "command" }]);
+                setCliInput('');
+
+                try {
+                    const res = await fetch('/api/cli/execute', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ node_id: nodeContext, command: cmd })
+                    });
+                    const data = await res.json();
+                    setCliHistory(prev => [...prev, { text: data.output, type: "output" }]);
+                    fetchTopology();
+                } catch (err) {
+                    setCliHistory(prev => [...prev, { text: "Error executing command", type: "error" }]);
+                }
+            };
+
+            // Fetch AI Diagnostics
+            const fetchAiDiagnostics = async () => {
+                const res = await fetch('/api/ai/diagnostics');
+                const data = await res.json();
+                setAiDiagnostics(data);
+                setIsAiModalOpen(true);
+            };
+
+            // Generate Config
+            const generateCiscoConfig = async (nodeId) => {
+                const res = await fetch('/api/export/cisco_config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ node_id: nodeId })
+                });
+                const data = await res.json();
+                setGeneratedConfig(data.config);
+                setIsConfigModalOpen(true);
+            };
+
+            // Export GNS3 / Packet Tracer
+            const downloadExport = async (format) => {
+                const res = await fetch(`/api/export/${format}`);
+                const data = await res.json();
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `network_digital_twin_${format}.${format === 'gns3' ? 'gns3' : 'json'}`;
+                a.click();
+            };
+
+            // Toggle Twin Sync mode
+            const toggleTwinMode = async (mode) => {
+                setTwinMode(mode);
+                await fetch('/api/twin/mode', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode })
+                });
+                fetchTopology();
+            };
+
+            const summary = topology.summary || {};
+
+            return (
+                <div className="flex flex-col h-screen w-screen bg-[#080c14] text-slate-100 overflow-hidden">
+                    {/* Top Navigation Bar */}
+                    <header className="h-16 px-6 glass-panel flex items-center justify-between z-30 border-b border-slate-800">
+                            <div className="flex items-center space-x-4">
+                            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+                                <i className="fa-solid fa-network-wired text-xl text-white"></i>
+                            </div>
+                            <div>
+                                <div className="flex items-center space-x-2">
+                                    <h1 className="text-lg font-bold tracking-wide bg-gradient-to-r from-white via-slate-200 to-cyan-400 bg-clip-text text-transparent">
+                                        NETWORK DIGITAL TWIN
+                                    </h1>
+                                    <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
+                                        v2.4 Enterprise
+                                    </span>
+                                </div>
+                                <p className="text-xs text-slate-400">Virtual Topology Mirroring & What-If Failure Simulator</p>
+                            </div>
+                        </div>
+
+                        {/* Top Status & Metrics Quickbar */}
+                        <div className="flex items-center space-x-6">
+                            {/* Health Score Indicator */}
+                            <div className="flex items-center space-x-3 px-4 py-1.5 rounded-lg bg-slate-900/60 border border-slate-800">
+                                <div className="text-right">
+                                    <div className="text-xs text-slate-400">Health Score</div>
+                                    <div className={`text-sm font-bold ${summary.health_score > 80 ? 'text-emerald-400' : summary.health_score > 50 ? 'text-amber-400' : 'text-red-400'}`}>
+                                        {summary.health_score ?? 100}%
+                                    </div>
+                                </div>
+                                <div className="w-9 h-9 rounded-full bg-slate-800 flex items-center justify-center">
+                                    <i className={`fa-solid ${summary.health_score > 80 ? 'fa-shield-halved text-emerald-400' : 'fa-triangle-exclamation text-amber-400'}`}></i>
+                                </div>
+                            </div>
+
+                            {/* Digital Twin Mode Badge */}
+                            <div className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-slate-900/60 border border-slate-800 text-xs">
+                                <span className="text-slate-400">Twin Mode:</span>
+                                <span className={`font-semibold px-2 py-0.5 rounded ${twinMode === 'LIVE_SYNC' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-purple-500/20 text-purple-400 border border-purple-500/30'}`}>
+                                    {twinMode}
+                                </span>
+                                <span className="text-slate-400 ml-1">Drift: <strong className="text-cyan-400">{summary.drift_percentage ?? 0}%</strong></span>
+                            </div>
+
+                            {/* Topology Presets Dropdown */}
+                            <select 
+                                value={template} 
+                                onChange={handleTemplateChange}
+                                className="bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded-lg px-3 py-2 outline-none focus:border-cyan-500"
+                            >
+                                <option value="enterprise_campus">🏢 Enterprise Campus</option>
+                                <option value="spine_leaf_datacenter">⚡ Data Center (Spine-Leaf)</option>
+                                <option value="isp_backbone">🌐 ISP Core Backbone (BGP)</option>
+                            </select>
+
+                            {/* AI Assistant Button */}
+                            <button 
+                                onClick={fetchAiDiagnostics}
+                                className="flex items-center space-x-2 px-3 py-2 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-semibold shadow-lg shadow-cyan-600/20 transition-all"
+                            >
+                                <i className="fa-solid fa-wand-magic-sparkles"></i>
+                                <span>AI Copilot</span>
+                            </button>
+
+                            {/* Restore / Heal All Button */}
+                            <button 
+                                onClick={healAll}
+                                className="flex items-center space-x-2 px-3 py-2 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 text-xs font-semibold transition-all"
+                            >
+                                <i className="fa-solid fa-kit-medical"></i>
+                                <span>Heal All</span>
+                            </button>
+                        </div>
+                    </header>
+
+                    {/* Main Workbench Area */}
+                    <div className="flex flex-1 overflow-hidden">
+                        {/* Left Viewport: Interactive Topology Graph Canvas */}
+                        <div className="flex-1 relative bg-[#080c14] overflow-hidden flex flex-col">
+                            {/* Topology Canvas Overlay Toolbar */}
+                            <div className="absolute top-4 left-4 z-10 flex items-center space-x-2 glass-panel p-1.5 rounded-lg border border-slate-800 text-xs">
+                                <span className="px-2 text-slate-400 font-medium">Nodes: <strong className="text-slate-200">{summary.total_nodes ?? 0}</strong></span>
+                                <span className="text-slate-600">|</span>
+                                <span className="px-2 text-slate-400 font-medium">Links: <strong className="text-slate-200">{summary.total_links ?? 0}</strong></span>
+                                <span className="text-slate-600">|</span>
+                                <span className="px-2 text-emerald-400 font-medium"><i className="fa-solid fa-circle text-[8px] mr-1"></i>Active: {summary.active_nodes ?? 0}</span>
+                                {summary.failed_nodes > 0 && (
+                                    <span className="px-2 text-red-400 font-medium"><i className="fa-solid fa-circle text-[8px] mr-1"></i>Failed: {summary.failed_nodes}</span>
+                                )}
+                            </div>
+
+                            {/* Export Options Dropdown */}
+                            <div className="absolute top-4 right-4 z-10 flex items-center space-x-2">
+                                <button 
+                                    onClick={() => downloadExport('gns3')}
+                                    className="px-3 py-1.5 glass-panel hover:bg-slate-800 rounded-lg text-xs font-medium text-slate-300 border border-slate-700 flex items-center space-x-1.5"
+                                >
+                                    <i className="fa-solid fa-file-export text-cyan-400"></i>
+                                    <span>Export GNS3</span>
+                                </button>
+                                <button 
+                                    onClick={() => downloadExport('packet_tracer')}
+                                    className="px-3 py-1.5 glass-panel hover:bg-slate-800 rounded-lg text-xs font-medium text-slate-300 border border-slate-700 flex items-center space-x-1.5"
+                                >
+                                    <i className="fa-solid fa-network-wired text-blue-400"></i>
+                                    <span>Export Packet Tracer</span>
+                                </button>
+                            </div>
+
+                            {/* SVG Topology Visualizer Engine */}
+                            <div className="w-full h-full flex-1 relative cursor-crosshair overflow-hidden">
+                                <TopologyCanvas 
+                                    nodes={topology.nodes} 
+                                    links={topology.links}
+                                    selectedNode={selectedNode}
+                                    setSelectedNode={setSelectedNode}
+                                    selectedLink={selectedLink}
+                                    setSelectedLink={setSelectedLink}
+                                    pathResult={pathFinder.result}
+                                />
+                            </div>
+
+                            {/* Bottom Incident Log Ticker */}
+                            <div className="h-10 glass-panel border-t border-slate-800 px-4 flex items-center justify-between text-xs">
+                                <div className="flex items-center space-x-2 overflow-hidden">
+                                    <span className="px-2 py-0.5 rounded bg-red-500/20 text-red-400 font-semibold text-[10px] border border-red-500/30">
+                                        INCIDENT FEED
+                                    </span>
+                                    <p className="text-slate-300 truncate">
+                                        {topology.incidents && topology.incidents.length > 0 ? (
+                                            <>
+                                                <span className="text-slate-500 mr-2">[{topology.incidents[0].timestamp}]</span>
+                                                <span className={topology.incidents[0].level === 'CRITICAL' ? 'text-red-400 font-semibold' : 'text-amber-300'}>
+                                                    {topology.incidents[0].message}
+                                                </span>
+                                            </>
+                                        ) : "System operating within standard operational parameters."}
+                                    </p>
+                                </div>
+                                <span className="text-slate-500 text-[10px]">Real-time Telemetry Polling Active</span>
+                            </div>
+                        </div>
+
+                        {/* Right Drawer: Multi-Tab Inspector & Simulator Controls */}
+                        <div className="w-96 glass-panel border-l border-slate-800 flex flex-col z-20">
+                            {/* Tab Navigation Header */}
+                            <div className="flex border-b border-slate-800 overflow-x-auto bg-slate-950/40">
+                                <button 
+                                    onClick={() => setActiveTab('inspector')}
+                                    className={`px-3 py-3 text-xs font-semibold border-b-2 flex items-center space-x-1.5 whitespace-nowrap ${activeTab === 'inspector' ? 'border-cyan-500 text-cyan-400 bg-slate-900/60' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+                                >
+                                    <i className="fa-solid fa-microchip"></i>
+                                    <span>Inspector</span>
+                                </button>
+                                <button 
+                                    onClick={() => setActiveTab('cli')}
+                                    className={`px-3 py-3 text-xs font-semibold border-b-2 flex items-center space-x-1.5 whitespace-nowrap ${activeTab === 'cli' ? 'border-cyan-500 text-cyan-400 bg-slate-900/60' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+                                >
+                                    <i className="fa-solid fa-terminal"></i>
+                                    <span>Cisco CLI</span>
+                                </button>
+                                <button 
+                                    onClick={() => setActiveTab('simulator')}
+                                    className={`px-3 py-3 text-xs font-semibold border-b-2 flex items-center space-x-1.5 whitespace-nowrap ${activeTab === 'simulator' ? 'border-cyan-500 text-cyan-400 bg-slate-900/60' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+                                >
+                                    <i className="fa-solid fa-burst text-amber-400"></i>
+                                    <span>What-If</span>
+                                </button>
+                                <button 
+                                    onClick={() => setActiveTab('telemetry')}
+                                    className={`px-3 py-3 text-xs font-semibold border-b-2 flex items-center space-x-1.5 whitespace-nowrap ${activeTab === 'telemetry' ? 'border-cyan-500 text-cyan-400 bg-slate-900/60' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+                                >
+                                    <i className="fa-solid fa-chart-line"></i>
+                                    <span>Telemetry</span>
+                                </button>
+                                <button 
+                                    onClick={() => setActiveTab('twin')}
+                                    className={`px-3 py-3 text-xs font-semibold border-b-2 flex items-center space-x-1.5 whitespace-nowrap ${activeTab === 'twin' ? 'border-cyan-500 text-cyan-400 bg-slate-900/60' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+                                >
+                                    <i className="fa-solid fa-clone"></i>
+                                    <span>Sync</span>
+                                </button>
+                            </div>
+
+                            {/* Tab Contents */}
+                            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                                {activeTab === 'inspector' && (
+                                    <InspectorTab 
+                                        selectedNode={selectedNode} 
+                                        selectedLink={selectedLink}
+                                        triggerFailure={triggerFailure}
+                                        generateCiscoConfig={generateCiscoConfig}
+                                    />
+                                )}
+
+                                {activeTab === 'cli' && (
+                                    <CliTab 
+                                        cliHistory={cliHistory}
+                                        cliInput={cliInput}
+                                        setCliInput={setCliInput}
+                                        handleCliSubmit={handleCliSubmit}
+                                        selectedNode={selectedNode}
+                                    />
+                                )}
+
+                                {activeTab === 'simulator' && (
+                                    <SimulatorTab 
+                                        nodes={topology.nodes}
+                                        links={topology.links}
+                                        triggerFailure={triggerFailure}
+                                        pathFinder={pathFinder}
+                                        setPathFinder={setPathFinder}
+                                        runPathFinder={runPathFinder}
+                                    />
+                                )}
+
+                                {activeTab === 'telemetry' && (
+                                    <TelemetryTab summary={summary} nodes={topology.nodes} links={topology.links} metricsHistory={metricsHistory} />
+                                )}
+
+                                {activeTab === 'twin' && (
+                                    <TwinSyncTab 
+                                        twinMode={twinMode} 
+                                        toggleTwinMode={toggleTwinMode}
+                                        summary={summary}
+                                        incidents={topology.incidents}
+                                    />
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* AI Diagnostics Modal */}
+                    {isAiModalOpen && aiDiagnostics && (
+                        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
+                            <div className="w-full max-w-2xl glass-panel rounded-2xl border border-cyan-500/30 overflow-hidden shadow-2xl">
+                                <div className="p-4 bg-slate-900/80 border-b border-slate-800 flex items-center justify-between">
+                                    <div className="flex items-center space-x-3">
+                                        <div className="w-8 h-8 rounded-lg bg-cyan-500/20 text-cyan-400 flex items-center justify-center border border-cyan-500/30">
+                                            <i className="fa-solid fa-wand-magic-sparkles"></i>
+                                        </div>
+                                        <div>
+                                            <h3 className="font-bold text-sm text-slate-100">Antigravity AI Network Diagnostics</h3>
+                                            <p className="text-xs text-slate-400">Confidence Score: <strong className="text-emerald-400">{aiDiagnostics.ai_confidence}%</strong></p>
+                                        </div>
+                                    </div>
+                                    <button onClick={() => setIsAiModalOpen(false)} className="text-slate-400 hover:text-slate-200">
+                                        <i className="fa-solid fa-xmark text-lg"></i>
+                                    </button>
+                                </div>
+                                <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+                                    <div className={`p-4 rounded-xl border text-sm ${aiDiagnostics.health_status === 'HEALTHY' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-red-500/10 border-red-500/30 text-red-300'}`}>
+                                        <div className="font-bold text-base mb-1">{aiDiagnostics.health_status}</div>
+                                        <div>{aiDiagnostics.status_text}</div>
+                                    </div>
+
+                                    <div>
+                                        <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Detected SLA Anomalies</h4>
+                                        {aiDiagnostics.issues.length === 0 ? (
+                                            <div className="text-xs text-slate-400 italic p-3 glass-card rounded-lg">No anomalies or faults detected.</div>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {aiDiagnostics.issues.map((issue, idx) => (
+                                                    <div key={idx} className="p-3 glass-card rounded-lg border-l-4 border-l-red-500 text-xs">
+                                                        <div className="font-bold text-slate-200 mb-1">{issue.title}</div>
+                                                        <div className="text-slate-400">{issue.description}</div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div>
+                                        <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Automated Remediation Recommendations</h4>
+                                        {aiDiagnostics.recommendations.length === 0 ? (
+                                            <div className="text-xs text-slate-400 italic p-3 glass-card rounded-lg">All systems running at peak performance.</div>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {aiDiagnostics.recommendations.map((rec, idx) => (
+                                                    <div key={idx} className="p-3 glass-card rounded-lg flex items-center justify-between text-xs">
+                                                        <div>
+                                                            <div className="font-bold text-cyan-400">{rec.title}</div>
+                                                            <div className="text-slate-400 text-[11px]">{rec.description}</div>
+                                                        </div>
+                                                        <button 
+                                                            onClick={async () => {
+                                                                await healAll();
+                                                                setIsAiModalOpen(false);
+                                                            }}
+                                                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-semibold text-xs ml-3"
+                                                        >
+                                                            Auto-Fix
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Cisco IOS Config Modal */}
+                    {isConfigModalOpen && (
+                        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
+                            <div className="w-full max-w-3xl glass-panel rounded-2xl border border-slate-700 overflow-hidden shadow-2xl">
+                                <div className="p-4 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
+                                    <div className="flex items-center space-x-2">
+                                        <i className="fa-solid fa-code text-cyan-400"></i>
+                                        <h3 className="font-bold text-sm text-slate-100">Generated Cisco IOS CLI Configuration</h3>
+                                    </div>
+                                    <button onClick={() => setIsConfigModalOpen(false)} className="text-slate-400 hover:text-slate-200">
+                                        <i className="fa-solid fa-xmark text-lg"></i>
+                                    </button>
+                                </div>
+                                <div className="p-4">
+                                    <pre className="p-4 bg-slate-950 rounded-xl text-xs code-font text-cyan-300 max-h-[60vh] overflow-y-auto border border-slate-800">
+                                        {generatedConfig}
+                                    </pre>
+                                    <div className="mt-4 flex justify-end space-x-3">
+                                        <button 
+                                            onClick={() => navigator.clipboard.writeText(generatedConfig)}
+                                            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold"
+                                        >
+                                            <i className="fa-regular fa-copy mr-2"></i>Copy to Clipboard
+                                        </button>
+                                        <button 
+                                            onClick={() => setIsConfigModalOpen(false)}
+                                            className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-semibold"
+                                        >
+                                            Close
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // SVG Topology Visualizer Component
+        function TopologyCanvas({ nodes, links, selectedNode, setSelectedNode, selectedLink, setSelectedLink, pathResult }) {
+            const pathNodeSet = new Set(pathResult?.path_nodes || []);
+            const pathLinkSet = new Set(pathResult?.path_links || []);
+
+            const getNodeIcon = (type) => {
+                switch (type) {
+                    case 'router': return 'fa-solid fa-route text-cyan-400';
+                    case 'switch': return 'fa-solid fa-network-wired text-blue-400';
+                    case 'firewall': return 'fa-solid fa-shield-halved text-amber-400';
+                    case 'server': return 'fa-solid fa-server text-purple-400';
+                    case 'client': return 'fa-solid fa-desktop text-emerald-400';
+                    case 'cloud': return 'fa-solid fa-cloud text-sky-400';
+                    default: return 'fa-solid fa-cube text-slate-400';
+                }
+            };
+
+            return (
+                <svg className="w-full h-full select-none" viewBox="0 0 1000 650">
+                    {/* Grid Background Pattern */}
+                    <defs>
+                        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(255,255,255,0.03)" strokeWidth="1" />
+                        </pattern>
+                        <linearGradient id="linkGradientNormal" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stopColor="#00f2fe" stopOpacity="0.6"/>
+                            <stop offset="100%" stopColor="#4facfe" stopOpacity="0.6"/>
+                        </linearGradient>
+                        <linearGradient id="linkGradientPath" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.9"/>
+                            <stop offset="100%" stopColor="#fb7185" stopOpacity="0.9"/>
+                        </linearGradient>
+                    </defs>
+
+                    <rect width="1000" height="650" fill="url(#grid)" />
+
+                    {/* Render Links */}
+                    <g>
+                        {links.map(link => {
+                            const sourceNode = nodes.find(n => n.id === link.source);
+                            const targetNode = nodes.find(n => n.id === link.target);
+                            if (!sourceNode || !targetNode) return null;
+
+                            const isSelected = selectedLink?.id === link.id;
+                            const isPath = pathLinkSet.has(link.id);
+                            const isDown = link.status === 'down';
+                            const isCongested = link.status === 'congested' || link.utilization > 80;
+
+                            const strokeColor = isDown ? '#ef4444' : isPath ? '#f43f5e' : isCongested ? '#f59e0b' : '#0066ff';
+                            const strokeWidth = isSelected ? 4 : isPath ? 3.5 : 2;
+
+                            const midX = (sourceNode.x + targetNode.x) / 2;
+                            const midY = (sourceNode.y + targetNode.y) / 2;
+
+                            return (
+                                <g key={link.id} onClick={() => setSelectedLink(link)} className="cursor-pointer">
+                                    <line 
+                                        x1={sourceNode.x} 
+                                        y1={sourceNode.y} 
+                                        x2={targetNode.x} 
+                                        y2={targetNode.y}
+                                        stroke={strokeColor}
+                                        strokeWidth={strokeWidth}
+                                        strokeDasharray={isDown ? '6,6' : 'none'}
+                                        opacity={isDown ? 0.4 : 0.8}
+                                    />
+
+                                    {/* Link Telemetry Tag */}
+                                    <g transform={`translate(${midX}, ${midY})`}>
+                                        <rect 
+                                            x="-35" y="-10" width="70" height="20" rx="6" 
+                                            fill="#0f172a" 
+                                            stroke={strokeColor}
+                                            strokeWidth="1"
+                                            opacity="0.9"
+                                        />
+                                        <text x="0" y="3" textAnchor="middle" fill="#94a3b8" fontSize="9" className="code-font font-medium">
+                                            {isDown ? 'DOWN' : `${link.latency}ms | ${link.utilization}%`}
+                                        </text>
+                                    </g>
+
+                                    {/* Animated Traffic Packets on Active Links */}
+                                    {!isDown && (
+                                        <circle r="3.5" fill={isPath ? '#f43f5e' : '#00f2fe'}>
+                                            <animateMotion 
+                                                path={`M ${sourceNode.x} ${sourceNode.y} L ${targetNode.x} ${targetNode.y}`}
+                                                dur={`${Math.max(0.6, 3.0 - (link.utilization/30.0))}s`}
+                                                repeatCount="indefinite"
+                                            />
+                                        </circle>
+                                    )}
+                                </g>
+                            );
+                        })}
+                    </g>
+
+                    {/* Render Nodes */}
+                    <g>
+                        {nodes.map(node => {
+                            const isSelected = selectedNode?.id === node.id;
+                            const isPath = pathNodeSet.has(node.id);
+                            const isFailed = node.status === 'failed';
+                            const isDegraded = node.status === 'degraded';
+
+                            return (
+                                <g 
+                                    key={node.id} 
+                                    transform={`translate(${node.x}, ${node.y})`}
+                                    onClick={() => setSelectedNode(node)}
+                                    className="cursor-pointer"
+                                >
+                                    {/* Node Outer Glow / Status Ring */}
+                                    <circle 
+                                        r={isSelected ? "26" : "22"} 
+                                        fill="#0f172a"
+                                        stroke={isFailed ? '#ef4444' : isPath ? '#f43f5e' : isDegraded ? '#f59e0b' : isSelected ? '#00f2fe' : '#334155'}
+                                        strokeWidth={isSelected || isPath ? "3" : "2"}
+                                        className={isFailed ? 'glow-failed' : isSelected ? 'glow-active' : ''}
+                                    />
+
+                                    {/* Node Icon */}
+                                    <foreignObject x="-12" y="-12" width="24" height="24">
+                                        <div className="w-full h-full flex items-center justify-center text-sm">
+                                            <i className={getNodeIcon(node.type)}></i>
+                                        </div>
+                                    </foreignObject>
+
+                                    {/* Node Label Tag */}
+                                    <text x="0" y="38" textAnchor="middle" fill="#f8fafc" fontSize="11" fontWeight="600">
+                                        {node.name}
+                                    </text>
+                                    <text x="0" y="50" textAnchor="middle" fill="#64748b" fontSize="9" className="code-font">
+                                        {node.ip}
+                                    </text>
+                                </g>
+                            );
+                        })}
+                    </g>
+                </svg>
+            );
+        }
+
+        // Inspector Tab Component
+        function InspectorTab({ selectedNode, selectedLink, triggerFailure, generateCiscoConfig }) {
+            if (!selectedNode && !selectedLink) {
+                return (
+                    <div className="text-center py-12 text-slate-400 space-y-3">
+                        <i className="fa-solid fa-hand-pointer text-3xl text-slate-600"></i>
+                        <p className="text-xs">Click on any router, switch, or link on the canvas to inspect real-time telemetry.</p>
+                    </div>
+                );
+            }
+
+            if (selectedNode) {
+                return (
+                    <div className="space-y-4 text-xs">
+                        <div className="p-4 glass-card rounded-xl border border-slate-800 space-y-3">
+                            <div className="flex items-center justify-between">
+                                <h3 className="font-bold text-sm text-slate-100 flex items-center space-x-2">
+                                    <i className="fa-solid fa-server text-cyan-400"></i>
+                                    <span>{selectedNode.name}</span>
+                                </h3>
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${selectedNode.status === 'active' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                                    {selectedNode.status.toUpperCase()}
+                                </span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 text-slate-300">
+                                <div><span className="text-slate-500">ID:</span> {selectedNode.id}</div>
+                                <div><span className="text-slate-500">Type:</span> {selectedNode.type}</div>
+                                <div><span className="text-slate-500">IP:</span> <span className="code-font text-cyan-400">{selectedNode.ip}</span></div>
+                                <div><span className="text-slate-500">Subnet:</span> /24</div>
+                            </div>
+                        </div>
+
+                        {/* Node System Telemetry */}
+                        <div className="p-4 glass-card rounded-xl border border-slate-800 space-y-3">
+                            <h4 className="font-semibold text-slate-300 uppercase text-[10px] tracking-wider">Node Hardware Load</h4>
+                            <div className="space-y-2">
+                                <div>
+                                    <div className="flex justify-between mb-1">
+                                        <span className="text-slate-400">CPU Usage</span>
+                                        <span className="font-bold text-slate-200">{selectedNode.cpu_load}%</span>
+                                    </div>
+                                    <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                        <div className="h-full bg-cyan-500" style={{ width: `${selectedNode.cpu_load}%` }}></div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="flex justify-between mb-1">
+                                        <span className="text-slate-400">RAM Allocation</span>
+                                        <span className="font-bold text-slate-200">{selectedNode.ram_load}%</span>
+                                    </div>
+                                    <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                        <div className="h-full bg-purple-500" style={{ width: `${selectedNode.ram_load}%` }}></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Routing Table Preview */}
+                        <div className="p-4 glass-card rounded-xl border border-slate-800 space-y-2">
+                            <h4 className="font-semibold text-slate-300 uppercase text-[10px] tracking-wider">OSPF Routing Table</h4>
+                            <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                                {selectedNode.routing_table && selectedNode.routing_table.length > 0 ? (
+                                    selectedNode.routing_table.map((r, i) => (
+                                        <div key={i} className="p-2 bg-slate-900/60 rounded text-[11px] code-font flex justify-between">
+                                            <span className="text-cyan-300">{r.destination}</span>
+                                            <span className="text-slate-400">via {r.next_hop}</span>
+                                        </div>
+                                    ))
+                                ) : (
+                                    <div className="text-slate-500 italic text-[11px]">No active OSPF routes.</div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Quick Actions */}
+                        <div className="space-y-2">
+                            <button 
+                                onClick={() => generateCiscoConfig(selectedNode.id)}
+                                className="w-full py-2 bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/30 text-cyan-300 rounded-lg font-semibold flex items-center justify-center space-x-2"
+                            >
+                                <i className="fa-solid fa-file-code"></i>
+                                <span>Generate Cisco IOS Config</span>
+                            </button>
+                            <button 
+                                onClick={() => triggerFailure('crash_node', selectedNode.id)}
+                                className="w-full py-2 bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 text-red-400 rounded-lg font-semibold flex items-center justify-center space-x-2"
+                            >
+                                <i className="fa-solid fa-power-off"></i>
+                                <span>Simulate Hardware Crash</span>
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (selectedLink) {
+                return (
+                    <div className="space-y-4 text-xs">
+                        <div className="p-4 glass-card rounded-xl border border-slate-800 space-y-3">
+                            <h3 className="font-bold text-sm text-slate-100 flex items-center space-x-2">
+                                <i className="fa-solid fa-link text-cyan-400"></i>
+                                <span>Link: {selectedLink.id}</span>
+                            </h3>
+                            <div className="grid grid-cols-2 gap-2 text-slate-300">
+                                <div><span className="text-slate-500">Source:</span> {selectedLink.source}</div>
+                                <div><span className="text-slate-500">Target:</span> {selectedLink.target}</div>
+                                <div><span className="text-slate-500">Latency:</span> {selectedLink.latency}ms</div>
+                                <div><span className="text-slate-500">Loss:</span> {selectedLink.loss}%</div>
+                            </div>
+                        </div>
+
+                        <div className="p-4 glass-card rounded-xl border border-slate-800 space-y-2">
+                            <h4 className="font-semibold text-slate-300 uppercase text-[10px] tracking-wider">Bandwidth Utilization</h4>
+                            <div className="text-lg font-bold text-cyan-400">{selectedLink.utilization}% ({selectedLink.throughput} Mbps)</div>
+                            <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                                <div className="h-full bg-cyan-500" style={{ width: `${selectedLink.utilization}%` }}></div>
+                            </div>
+                        </div>
+
+                        <button 
+                            onClick={() => triggerFailure('cut_link', selectedLink.id)}
+                            className="w-full py-2 bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 text-red-400 rounded-lg font-semibold flex items-center justify-center space-x-2"
+                        >
+                            <i className="fa-solid fa-scissors"></i>
+                            <span>Sever Fiber Link</span>
+                        </button>
+                    </div>
+                );
+            }
+        }
+
+        // Cisco CLI Simulator Component
+        function CliTab({ cliHistory, cliInput, setCliInput, handleCliSubmit, selectedNode }) {
+            const endRef = useRef(null);
+            useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [cliHistory]);
+
+            return (
+                <div className="flex flex-col h-[520px] bg-slate-950 rounded-xl border border-slate-800 overflow-hidden font-mono text-xs">
+                    <div className="px-3 py-2 bg-slate-900 border-b border-slate-800 text-slate-400 flex justify-between items-center text-[11px]">
+                        <span>Console Context: <strong className="text-cyan-400">{selectedNode ? selectedNode.name : 'Default Router'}</strong></span>
+                        <span className="text-emerald-400">TTY0/0 Ready</span>
+                    </div>
+
+                    <div className="flex-1 p-3 overflow-y-auto space-y-2 code-font">
+                        {cliHistory.map((item, idx) => (
+                            <div key={idx} className={item.type === 'command' ? 'text-cyan-400 font-semibold' : item.type === 'error' ? 'text-red-400' : 'text-slate-300 whitespace-pre-wrap'}>
+                                {item.text}
+                            </div>
+                        ))}
+                        <div ref={endRef} />
+                    </div>
+
+                    <form onSubmit={handleCliSubmit} className="p-2 bg-slate-900 border-t border-slate-800 flex items-center">
+                        <span className="text-cyan-400 mr-2 font-bold">#</span>
+                        <input 
+                            type="text" 
+                            value={cliInput}
+                            onChange={e => setCliInput(e.target.value)}
+                            placeholder="Type CLI command (e.g. show ip route, ping 10.0.0.1)..."
+                            className="flex-1 bg-transparent text-slate-100 outline-none text-xs code-font"
+                        />
+                    </form>
+                </div>
+            );
+        }
+
+        // What-If Simulator Component
+        function SimulatorTab({ nodes, links, triggerFailure, pathFinder, setPathFinder, runPathFinder }) {
+            return (
+                <div className="space-y-4 text-xs">
+                    <div className="p-4 glass-card rounded-xl border border-slate-800 space-y-3">
+                        <h3 className="font-bold text-sm text-slate-100 flex items-center space-x-2">
+                            <i className="fa-solid fa-burst text-amber-400"></i>
+                            <span>Failure Stress Injector</span>
+                        </h3>
+                        <p className="text-slate-400 text-[11px]">Simulate physical line cuts, router crashes, and malicious DDoS floods.</p>
+
+                        <div className="grid grid-cols-2 gap-2">
+                            <button 
+                                onClick={() => {
+                                    if (links.length > 0) triggerFailure('cut_link', links[0].id);
+                                }}
+                                className="p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-lg text-slate-200 text-left font-semibold"
+                            >
+                                <i className="fa-solid fa-scissors text-red-400 mr-2"></i>Cut Primary Link
+                            </button>
+                            <button 
+                                onClick={() => {
+                                    if (nodes.length > 0) triggerFailure('crash_node', nodes[0].id);
+                                }}
+                                className="p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-lg text-slate-200 text-left font-semibold"
+                            >
+                                <i className="fa-solid fa-power-off text-amber-400 mr-2"></i>Crash Core Node
+                            </button>
+                            <button 
+                                onClick={() => {
+                                    if (nodes.length > 0) triggerFailure('ddos_attack', nodes[0].id);
+                                }}
+                                className="p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-lg text-slate-200 text-left font-semibold"
+                            >
+                                <i className="fa-solid fa-skull text-purple-400 mr-2"></i>DDoS Flood
+                            </button>
+                            <button 
+                                onClick={() => {
+                                    if (links.length > 0) triggerFailure('inject_latency', links[0].id);
+                                }}
+                                className="p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-lg text-slate-200 text-left font-semibold"
+                            >
+                                <i className="fa-solid fa-hourglass-half text-cyan-400 mr-2"></i>Latency Spike
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Routing Path Finder Tool */}
+                    <div className="p-4 glass-card rounded-xl border border-slate-800 space-y-3">
+                        <h4 className="font-bold text-slate-200">OSPF/BGP Path Visualizer</h4>
+                        <div className="space-y-2">
+                            <div>
+                                <label className="text-slate-400 text-[10px] block mb-1">Source Node:</label>
+                                <select 
+                                    value={pathFinder.source}
+                                    onChange={e => setPathFinder(p => ({ ...p, source: e.target.value }))}
+                                    className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-slate-200 outline-none"
+                                >
+                                    <option value="">-- Select Source --</option>
+                                    {nodes.map(n => <option key={n.id} value={n.id}>{n.name} ({n.ip})</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="text-slate-400 text-[10px] block mb-1">Destination Target:</label>
+                                <select 
+                                    value={pathFinder.target}
+                                    onChange={e => setPathFinder(p => ({ ...p, target: e.target.value }))}
+                                    className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-slate-200 outline-none"
+                                >
+                                    <option value="">-- Select Target --</option>
+                                    {nodes.map(n => <option key={n.id} value={n.id}>{n.name} ({n.ip})</option>)}
+                                </select>
+                            </div>
+                            <button 
+                                onClick={runPathFinder}
+                                className="w-full py-2 bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-semibold rounded-lg shadow"
+                            >
+                                Compute Optimal Path
+                            </button>
+                        </div>
+
+                        {pathFinder.result && (
+                            <div className="mt-3 p-3 bg-slate-950 rounded-lg border border-slate-800 text-xs space-y-1">
+                                {pathFinder.result.success ? (
+                                    <>
+                                        <div className="text-emerald-400 font-bold">Path Calculated Successfully</div>
+                                        <div>Hops: {pathFinder.result.hop_count} | Latency: {pathFinder.result.total_latency_ms}ms</div>
+                                        <div className="text-slate-400 text-[11px] truncate">
+                                            Route: {pathFinder.result.path_nodes.join(" ➔ ")}
+                                        </div>
+                                    </>
+                                ) : (
+                                    <div className="text-red-400 font-bold">{pathFinder.result.reason}</div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // Telemetry Tab Component (renders charts for CPU/RAM using Chart.js)
+        function TelemetryTab({ summary, nodes, links, metricsHistory }) {
+            const cpuCanvasRef = useRef(null);
+            const ramCanvasRef = useRef(null);
+            const cpuChartRef = useRef(null);
+            const ramChartRef = useRef(null);
+
+            useEffect(() => {
+                if (cpuCanvasRef.current && !cpuChartRef.current) {
+                    cpuChartRef.current = new Chart(cpuCanvasRef.current.getContext('2d'), {
+                        type: 'line',
+                        data: {
+                            labels: metricsHistory.ts || [],
+                            datasets: [{ label: 'Avg CPU %', data: metricsHistory.cpu || [], borderColor: '#06b6d4', backgroundColor: 'rgba(6,182,212,0.08)', fill: true, tension: 0.3 }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, max: 100 } } }
+                    });
+                }
+
+                if (ramCanvasRef.current && !ramChartRef.current) {
+                    ramChartRef.current = new Chart(ramCanvasRef.current.getContext('2d'), {
+                        type: 'line',
+                        data: {
+                            labels: metricsHistory.ts || [],
+                            datasets: [{ label: 'Avg RAM %', data: metricsHistory.ram || [], borderColor: '#a78bfa', backgroundColor: 'rgba(167,139,250,0.08)', fill: true, tension: 0.3 }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, max: 100 } } }
+                    });
+                }
+
+                // update charts when metricsHistory changes
+                if (cpuChartRef.current) {
+                    cpuChartRef.current.data.labels = metricsHistory.ts || [];
+                    cpuChartRef.current.data.datasets[0].data = metricsHistory.cpu || [];
+                    cpuChartRef.current.update('none');
+                }
+
+                if (ramChartRef.current) {
+                    ramChartRef.current.data.labels = metricsHistory.ts || [];
+                    ramChartRef.current.data.datasets[0].data = metricsHistory.ram || [];
+                    ramChartRef.current.update('none');
+                }
+
+                return () => {
+                    // cleanup on unmount
+                    // keep charts for reuse during session, but if unmounting destroy
+                    // (React dev may remount frequently)
+                    // destroy only if refs exist
+                    // (avoid destroying on every update)
+                };
+            }, [metricsHistory]);
+
+            return (
+                <div className="space-y-4 text-xs">
+                    <div className="p-4 glass-card rounded-xl border border-slate-800 space-y-3">
+                        <h3 className="font-bold text-sm text-slate-100 flex items-center space-x-2">
+                            <i className="fa-solid fa-chart-line text-cyan-400"></i>
+                            <span>Live SNMP Metrics</span>
+                        </h3>
+
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="p-3 bg-slate-900/60 rounded-lg h-44">
+                                <div className="text-slate-400 text-[10px] mb-2">Avg CPU (last samples)</div>
+                                <div className="h-32">
+                                    <canvas ref={cpuCanvasRef} />
+                                </div>
+                            </div>
+
+                            <div className="p-3 bg-slate-900/60 rounded-lg h-44">
+                                <div className="text-slate-400 text-[10px] mb-2">Avg RAM (last samples)</div>
+                                <div className="h-32">
+                                    <canvas ref={ramCanvasRef} />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 mt-3 text-center">
+                            <div className="p-3 bg-slate-900/60 rounded-lg">
+                                <div className="text-slate-400 text-[10px]">Avg Latency</div>
+                                <div className="text-base font-bold text-cyan-400">{summary.avg_latency ?? 0} ms</div>
+                            </div>
+                            <div className="p-3 bg-slate-900/60 rounded-lg">
+                                <div className="text-slate-400 text-[10px]">Total Throughput</div>
+                                <div className="text-base font-bold text-purple-400">{summary.total_throughput_gbps ?? 0} Gbps</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // Digital Twin Sync Tab Component
+        function TwinSyncTab({ twinMode, toggleTwinMode, summary, incidents }) {
+            return (
+                <div className="space-y-4 text-xs">
+                    <div className="p-4 glass-card rounded-xl border border-slate-800 space-y-3">
+                        <h3 className="font-bold text-sm text-slate-100">Digital Twin Alignment</h3>
+                        <p className="text-slate-400 text-[11px]">Compare physical network telemetry against the virtual digital twin model.</p>
+                        
+                        <div className="space-y-2">
+                            <button 
+                                onClick={() => toggleTwinMode('LIVE_SYNC')}
+                                className={`w-full p-3 rounded-lg border text-left flex justify-between items-center ${twinMode === 'LIVE_SYNC' ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300' : 'bg-slate-900 border-slate-800 text-slate-400'}`}
+                            >
+                                <div>
+                                    <div className="font-bold">LIVE TELEMETRY MIRROR</div>
+                                    <div className="text-[10px] opacity-80">Real-time sync with network telemetry</div>
+                                </div>
+                                {twinMode === 'LIVE_SYNC' && <i className="fa-solid fa-check"></i>}
+                            </button>
+
+                            <button 
+                                onClick={() => toggleTwinMode('ISOLATED_SANDBOX')}
+                                className={`w-full p-3 rounded-lg border text-left flex justify-between items-center ${twinMode === 'ISOLATED_SANDBOX' ? 'bg-purple-500/20 border-purple-500/40 text-purple-300' : 'bg-slate-900 border-slate-800 text-slate-400'}`}
+                            >
+                                <div>
+                                    <div className="font-bold">ISOLATED SANDBOX MODE</div>
+                                    <div className="text-[10px] opacity-80">Test high-risk changes safely offline</div>
+                                </div>
+                                {twinMode === 'ISOLATED_SANDBOX' && <i className="fa-solid fa-check"></i>}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // Render Application
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
