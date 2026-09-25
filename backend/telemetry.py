@@ -91,5 +91,85 @@ class TelemetryEngine:
             "status_text": status_text,
             "issues": issues,
             "recommendations": recommendations,
-            "ai_confidence": round(random.uniform(94.2, 99.1), 1)
+            "ai_confidence": round(random.uniform(94.2, 99.1), 1),
+            "sampled_at": time.time()
+        }
+
+    def generate_network_insights(self) -> Dict[str, Any]:
+        """Return explainable risk scoring for capacity and SLA planning."""
+        node_risks = []
+        for node in self.sim.nodes.values():
+            risk = 0
+            reasons = []
+            if node["status"] == "failed":
+                risk += 100
+                reasons.append("device failed")
+            elif node["status"] == "degraded":
+                risk += 45
+                reasons.append("device degraded")
+            if node["cpu_load"] >= 80:
+                risk += 30
+                reasons.append(f"CPU {node['cpu_load']}%")
+            if node["ram_load"] >= 80:
+                risk += 20
+                reasons.append(f"RAM {node['ram_load']}%")
+            if risk:
+                node_risks.append({
+                    "id": node["id"],
+                    "name": node["name"],
+                    "risk_score": min(100, risk),
+                    "reasons": reasons
+                })
+
+        link_risks = []
+        for link in self.sim.links.values():
+            risk = 0
+            reasons = []
+            if link["status"] == "down":
+                risk += 100
+                reasons.append("link down")
+            if link["utilization"] >= 80:
+                risk += 35
+                reasons.append(f"utilization {link['utilization']}%")
+            if link["latency"] >= 50:
+                risk += 30
+                reasons.append(f"latency {link['latency']} ms")
+            if link["loss"] >= 5:
+                risk += 25
+                reasons.append(f"packet loss {link['loss']}%")
+            if risk:
+                link_risks.append({
+                    "id": link["id"],
+                    "risk_score": min(100, risk),
+                    "reasons": reasons
+                })
+
+        node_risks.sort(key=lambda item: item["risk_score"], reverse=True)
+        link_risks.sort(key=lambda item: item["risk_score"], reverse=True)
+        summary = self.sim.get_summary()
+        hotspot_count = len(node_risks) + len(link_risks)
+        if any(item["risk_score"] >= 80 for item in node_risks + link_risks):
+            sla_status = "AT_RISK"
+        elif hotspot_count:
+            sla_status = "WATCH"
+        else:
+            sla_status = "WITHIN_TARGET"
+
+        recommendations = []
+        if node_risks:
+            recommendations.append("Review the highest-risk devices before the next traffic peak.")
+        if link_risks:
+            recommendations.append("Redistribute traffic or increase capacity on hotspot links.")
+        if not recommendations:
+            recommendations.append("No immediate capacity action is required.")
+
+        return {
+            "sla_status": sla_status,
+            "risk_score": max([item["risk_score"] for item in node_risks + link_risks] or [0]),
+            "hotspot_count": hotspot_count,
+            "top_nodes": node_risks[:5],
+            "top_links": link_risks[:5],
+            "recommendations": recommendations,
+            "sampled_at": time.time(),
+            "health_score": summary["health_score"]
         }

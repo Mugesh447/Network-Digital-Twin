@@ -79,6 +79,22 @@
         .glow-active { animation: pulse-cyan 2.5s infinite; }
         .glow-failed { animation: pulse-red 1.2s infinite; }
 
+        .login-grid {
+            background-color: #080c14;
+            background-image: linear-gradient(rgba(56, 189, 248, 0.045) 1px, transparent 1px), linear-gradient(90deg, rgba(56, 189, 248, 0.045) 1px, transparent 1px);
+            background-size: 48px 48px;
+        }
+
+        .login-card {
+            background: #101820;
+            border: 1px solid rgba(148, 163, 184, 0.18);
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+        }
+
+        .login-brand-mark {
+            box-shadow: inset 0 0 0 1px rgba(103, 232, 249, 0.24), 0 0 28px rgba(8, 145, 178, 0.18);
+        }
+
         /* Custom Scrollbars */
         ::-webkit-scrollbar {
             width: 6px;
@@ -106,10 +122,18 @@
         // Mock topology generator (used when backend /api/topology is unavailable)
         function generateMockTopology() {
             const nodes = [];
+            const professionalNames = [
+                'Core Gateway',
+                'Distribution Gateway',
+                'Campus Aggregation',
+                'WAN Edge Router',
+                'Security Gateway',
+                'Internet Edge'
+            ];
             for (let i = 1; i <= 6; i++) {
                 nodes.push({
                     id: `n${i}`,
-                    name: `R${i}`,
+                    name: professionalNames[i - 1],
                     type: i % 3 === 0 ? 'switch' : 'router',
                     ip: `10.0.0.${i}`,
                     x: 100 + (i * 120) % 900,
@@ -157,45 +181,44 @@
                     const result = await onLogin(username, password);
                     if (!result.success) setError(result.error || 'Unable to sign in.');
                 } catch (requestError) {
-                    setError('Backend unavailable. Start the Network Digital Twin server and try again.');
+                    setError('Backend unavailable. Start the server and try again.');
                 } finally {
                     setLoading(false);
                 }
             };
 
+            const createAccount = async () => {
+                const newUsername = window.prompt('Choose a username (3+ characters):');
+                if (!newUsername) return;
+                const newPassword = window.prompt('Choose a password (6+ characters):');
+                if (!newPassword) return;
+                const role = window.prompt('Role: viewer or operator', 'viewer') || 'viewer';
+                const response = await fetch('/api/auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: newUsername, password: newPassword, role })
+                });
+                const result = await response.json();
+                if (!result.success) {
+                    setError(result.error || 'Unable to create account.');
+                    return;
+                }
+                await onLogin(newUsername, newPassword);
+            };
+
             return (
-                <div className="min-h-screen bg-[#080c14] text-slate-100 flex items-center justify-center p-6 relative overflow-hidden">
-                    <div className="absolute inset-0 opacity-30 bg-[radial-gradient(circle_at_20%_20%,#0891b2_0,transparent_32%),radial-gradient(circle_at_80%_80%,#1d4ed8_0,transparent_30%)]"></div>
-                    <div className="relative w-full max-w-5xl min-h-[580px] grid lg:grid-cols-[1.05fr_0.95fr] glass-panel rounded-3xl overflow-hidden border border-cyan-500/20 shadow-2xl shadow-cyan-950/40">
-                        <div className="hidden lg:flex flex-col justify-between p-12 bg-gradient-to-br from-cyan-950/70 via-slate-950/60 to-blue-950/60 border-r border-slate-800">
-                            <div>
-                                <div className="flex items-center gap-3 mb-14">
-                                    <div className="w-12 h-12 rounded-2xl bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center"><i className="fa-solid fa-network-wired text-2xl text-cyan-300"></i></div>
-                                    <div><div className="font-bold tracking-[0.18em] text-sm">NDT CONTROL</div><div className="text-[10px] text-cyan-300/70 uppercase tracking-widest">Infrastructure intelligence</div></div>
-                                </div>
-                                <div className="text-xs uppercase tracking-[0.3em] text-cyan-300 mb-4">Digital twin operations</div>
-                                <h1 className="text-5xl font-bold leading-tight text-white">See the network<br /><span className="text-cyan-300">before it breaks.</span></h1>
-                                <p className="mt-6 max-w-md text-sm leading-6 text-slate-400">Model topology, simulate failure, trace routes, and monitor live infrastructure telemetry from one operations workspace.</p>
-                            </div>
-                            <div className="grid grid-cols-3 gap-3 text-[10px] text-slate-400">
-                                <div className="p-3 rounded-xl bg-white/5 border border-white/10"><i className="fa-solid fa-wave-square text-cyan-300 mb-2"></i><div>Live telemetry</div></div>
-                                <div className="p-3 rounded-xl bg-white/5 border border-white/10"><i className="fa-solid fa-route text-cyan-300 mb-2"></i><div>Route analysis</div></div>
-                                <div className="p-3 rounded-xl bg-white/5 border border-white/10"><i className="fa-solid fa-shield-halved text-cyan-300 mb-2"></i><div>Failure testing</div></div>
-                            </div>
+                <>
+                <button onClick={createAccount} className="fixed top-6 right-6 z-20 px-4 py-2 rounded-lg border border-slate-700 bg-[#111b24] text-xs text-slate-300 hover:text-cyan-300 hover:border-cyan-400/60 transition">Create account <i className="fa-solid fa-user-plus ml-2"></i></button>
+                <div className="login-grid min-h-screen text-slate-100 flex items-center justify-center p-6 relative overflow-hidden">
+                    <div className="relative w-full max-w-5xl min-h-[560px] grid lg:grid-cols-[1.05fr_0.95fr] login-card rounded-2xl overflow-hidden">
+                        <div className="hidden lg:flex flex-col justify-between p-12 bg-[#0d151d] border-r border-slate-700/60">
+                            <div><div className="flex items-center gap-3 mb-16"><div className="login-brand-mark w-12 h-12 rounded-xl bg-cyan-500/10 border border-cyan-400/40 flex items-center justify-center"><i className="fa-solid fa-network-wired text-xl text-cyan-300"></i></div><div><div className="font-bold tracking-[0.18em] text-sm">NDT / CONTROL PLANE</div><div className="text-[10px] text-slate-500 uppercase tracking-widest mt-1">Network operations workspace</div></div></div><div className="text-[10px] uppercase tracking-[0.28em] text-cyan-300 mb-4">Digital twin workspace</div><h1 className="text-4xl font-semibold leading-tight text-slate-100">Network visibility<br /><span className="text-cyan-300">with operational context.</span></h1><p className="mt-6 max-w-md text-sm leading-6 text-slate-400">Topology, telemetry, route analysis, and failure simulation in one controlled workspace.</p></div>
+                            <div className="grid grid-cols-3 gap-3 text-[10px] text-slate-400"><div className="p-3 rounded-xl bg-white/5 border border-white/10"><i className="fa-solid fa-wave-square text-cyan-300 mb-2"></i><div>Live telemetry</div></div><div className="p-3 rounded-xl bg-white/5 border border-white/10"><i className="fa-solid fa-route text-cyan-300 mb-2"></i><div>Route analysis</div></div><div className="p-3 rounded-xl bg-white/5 border border-white/10"><i className="fa-solid fa-shield-halved text-cyan-300 mb-2"></i><div>Failure testing</div></div></div>
                         </div>
-                        <div className="flex items-center justify-center p-8 sm:p-12 bg-slate-950/60">
-                            <form onSubmit={submit} className="w-full max-w-sm space-y-6">
-                                <div className="lg:hidden flex items-center gap-3 mb-10"><div className="w-10 h-10 rounded-xl bg-cyan-500/20 flex items-center justify-center"><i className="fa-solid fa-network-wired text-cyan-300"></i></div><div className="font-bold tracking-widest text-sm">NDT CONTROL</div></div>
-                                <div><div className="text-xs uppercase tracking-[0.25em] text-cyan-300 mb-3">Secure workspace</div><h2 className="text-3xl font-bold text-white">Welcome back</h2><p className="text-sm text-slate-400 mt-2">Sign in to access your network twin.</p></div>
-                                <label className="block"><span className="text-xs text-slate-400">Role profile</span><select value={username} onChange={event => { setUsername(event.target.value); setPassword(`${event.target.value}123`); }} className="mt-2 w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-cyan-400"><option value="admin">Administrator</option><option value="operator">Network Operator</option><option value="viewer">Read-only Viewer</option></select></label>
-                                <label className="block"><span className="text-xs text-slate-400">Password</span><input value={password} onChange={event => setPassword(event.target.value)} type="password" className="mt-2 w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-cyan-400" /></label>
-                                {error && <div className="p-3 rounded-xl border border-red-500/30 bg-red-500/10 text-xs text-red-300"><i className="fa-solid fa-circle-exclamation mr-2"></i>{error}</div>}
-                                <button disabled={loading} className="w-full py-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-60 text-slate-950 font-bold text-sm shadow-lg shadow-cyan-500/20 transition">{loading ? 'Authenticating...' : 'Enter control room'}<i className="fa-solid fa-arrow-right ml-3"></i></button>
-                                <div className="flex items-center justify-between text-[10px] text-slate-500"><span><i className="fa-solid fa-lock mr-1"></i>Protected session</span><span>v2.4 Enterprise</span></div>
-                            </form>
-                        </div>
+                        <div className="flex items-center justify-center p-8 sm:p-12 bg-[#111b24]"><form onSubmit={submit} className="w-full max-w-sm space-y-6"><div className="lg:hidden flex items-center gap-3 mb-10"><div className="login-brand-mark w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-400/40 flex items-center justify-center"><i className="fa-solid fa-network-wired text-cyan-300"></i></div><div className="font-bold tracking-widest text-sm">NDT / CONTROL PLANE</div></div><div><div className="flex items-center justify-between mb-3"><div className="text-[10px] uppercase tracking-[0.25em] text-cyan-300">Operator sign-in</div><span className="text-[10px] text-emerald-400"><i className="fa-solid fa-circle text-[6px] mr-1"></i>System ready</span></div><h2 className="text-3xl font-semibold text-slate-100">Access workspace</h2><p className="text-sm text-slate-400 mt-2">Authenticate to open the network control room.</p></div><label className="block"><span className="text-xs text-slate-400">Role profile</span><select value={username} onChange={event => { setUsername(event.target.value); setPassword(`${event.target.value}123`); }} className="mt-2 w-full bg-[#0c141b] border border-slate-700/80 rounded-lg px-4 py-3 text-sm outline-none focus:border-cyan-400"><option value="admin">Administrator</option><option value="operator">Network Operator</option><option value="viewer">Read-only Viewer</option></select></label><label className="block"><span className="text-xs text-slate-400">Password</span><input value={password} onChange={event => setPassword(event.target.value)} type="password" className="mt-2 w-full bg-[#0c141b] border border-slate-700/80 rounded-lg px-4 py-3 text-sm outline-none focus:border-cyan-400" /></label>{error && <div className="p-3 rounded-lg border border-red-500/30 bg-red-500/10 text-xs text-red-300"><i className="fa-solid fa-circle-exclamation mr-2"></i>{error}</div>}<button disabled={loading} className="w-full py-3 rounded-lg bg-cyan-400 hover:bg-cyan-300 disabled:opacity-60 text-slate-950 font-bold text-sm shadow-lg shadow-cyan-500/20 transition">{loading ? 'Authenticating...' : 'Open control room'}<i className="fa-solid fa-arrow-right ml-3"></i></button><div className="flex items-center justify-between text-[10px] text-slate-500"><span><i className="fa-solid fa-lock mr-1"></i>Encrypted session</span><span>Build 2.4.0</span></div></form></div>
                     </div>
                 </div>
+                </>
             );
         }
 
@@ -207,6 +230,7 @@
             const [template, setTemplate] = useState('enterprise_campus');
             const [twinMode, setTwinMode] = useState('LIVE_SYNC');
             const [aiDiagnostics, setAiDiagnostics] = useState(null);
+            const [copilotInsights, setCopilotInsights] = useState(null);
             const [networkInsights, setNetworkInsights] = useState(null);
             const [advancedData, setAdvancedData] = useState(null);
             const [auth, setAuth] = useState({ authenticated: false, role: 'viewer', token: '' });
@@ -262,40 +286,67 @@
                 if (!auth.authenticated) return undefined;
                 fetchTopology();
                 let fallbackTimer;
+                let watchdogTimer;
                 let socket;
+                let receivedMessage = false;
+                const startFallback = () => {
+                    if (!fallbackTimer) {
+                        setLiveStatus('polling fallback');
+                        fallbackTimer = setInterval(fetchTopology, 2000);
+                    }
+                };
                 try {
                     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                     socket = new WebSocket(`${protocol}//${window.location.host}/ws/telemetry`);
                     socket.onopen = () => setLiveStatus('live');
                     socket.onmessage = event => {
                         const data = JSON.parse(event.data);
+                        receivedMessage = true;
                         setTopology(data);
+                        if (data.ai_diagnostics) setAiDiagnostics(data.ai_diagnostics);
                         setLiveStatus('live');
+                        const avgCpu = Math.round((data.nodes.reduce((sum, node) => sum + (node.cpu_load || 0), 0) / Math.max(1, data.nodes.length)));
+                        const avgRam = Math.round((data.nodes.reduce((sum, node) => sum + (node.ram_load || 0), 0) / Math.max(1, data.nodes.length)));
+                        setMetricsHistory(prev => ({
+                            cpu: [...prev.cpu, avgCpu].slice(-60),
+                            ram: [...prev.ram, avgRam].slice(-60),
+                            ts: [...prev.ts, new Date().toLocaleTimeString()].slice(-60)
+                        }));
                     };
-                    socket.onerror = () => {
-                        setLiveStatus('polling fallback');
-                        fallbackTimer = setInterval(fetchTopology, 2000);
-                    };
-                    socket.onclose = () => {
-                        if (!fallbackTimer) fallbackTimer = setInterval(fetchTopology, 2000);
-                    };
+                    socket.onerror = startFallback;
+                    socket.onclose = startFallback;
+                    watchdogTimer = setTimeout(() => { if (!receivedMessage) startFallback(); }, 4000);
                 } catch (error) {
-                    setLiveStatus('polling fallback');
-                    fallbackTimer = setInterval(fetchTopology, 2000);
+                    startFallback();
                 }
                 return () => {
                     clearInterval(fallbackTimer);
+                    clearTimeout(watchdogTimer);
                     if (socket) socket.close();
                 };
             }, [selectedNode?.id, auth.authenticated]);
+
+            useEffect(() => {
+                if (!isAiModalOpen || !auth.authenticated) return undefined;
+                const timer = setInterval(fetchAiDiagnostics, 3000);
+                return () => clearInterval(timer);
+            }, [isAiModalOpen, auth.authenticated]);
 
             const login = async (username, password) => {
                 const res = await fetch('/api/auth/login', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ username, password })
                 });
-                const data = await res.json();
-                if (data.success) setAuth({ ...data });
+                let data;
+                try {
+                    data = await res.json();
+                } catch (error) {
+                    return { success: false, error: `Server returned an invalid response (${res.status}).` };
+                }
+                if (!res.ok || !data.success) {
+                    return { success: false, error: data.error || `Login failed (${res.status}).` };
+                }
+                setAuth({ authenticated: true, token: data.token, username: data.username, role: data.role, permissions: data.permissions });
                 return data;
             };
 
@@ -341,6 +392,17 @@
                 setPathFinder(prev => ({ ...prev, result: data }));
             };
 
+            const runAutoReroute = async () => {
+                if (!pathFinder.source || !pathFinder.target) return;
+                const res = await fetch('/api/advanced/route-optimize', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ source: pathFinder.source, target: pathFinder.target })
+                });
+                const data = await res.json();
+                setPathFinder(prev => ({ ...prev, result: data }));
+            };
+
             // Run CLI command
             const handleCliSubmit = async (e) => {
                 e.preventDefault();
@@ -368,9 +430,15 @@
 
             // Fetch AI Diagnostics
             const fetchAiDiagnostics = async () => {
-                const res = await fetch('/api/ai/diagnostics');
-                const data = await res.json();
-                setAiDiagnostics(data);
+                const [diagnostics, forecast, insights, drift, capacity] = await Promise.all([
+                    fetch('/api/ai/diagnostics').then(res => res.json()),
+                    fetch('/api/advanced/forecast').then(res => res.json()),
+                    fetch('/api/insights').then(res => res.json()),
+                    fetch('/api/config-drift').then(res => res.json()),
+                    fetch('/api/capacity-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ growth_percent: 25, horizon_months: 6 }) }).then(res => res.json())
+                ]);
+                setAiDiagnostics(diagnostics);
+                setCopilotInsights({ forecast, insights, drift, capacity });
                 setIsAiModalOpen(true);
             };
 
@@ -381,15 +449,25 @@
             };
 
             const fetchAdvancedData = async () => {
-                const [forecast, history, gns3, capacity, alert, drift] = await Promise.all([
+                const [forecast, history, gns3, capacity, alert, drift, audit] = await Promise.all([
                     fetch('/api/advanced/forecast').then(res => res.json()),
                     fetch('/api/history?limit=12').then(res => res.json()),
                     fetch('/api/gns3/sync', { method: 'POST' }).then(res => res.json()),
                     fetch('/api/capacity-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ growth_percent: 25, horizon_months: 6 }) }).then(res => res.json()),
                     fetch('/api/alerts/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel: 'teams' }) }).then(res => res.json()),
-                    fetch('/api/config-drift').then(res => res.json())
+                    fetch('/api/config-drift').then(res => res.json()),
+                    fetch('/api/audit-log?limit=8').then(res => res.json())
                 ]);
-                setAdvancedData({ forecast, history, gns3, capacity, alert, drift });
+                setAdvancedData({ forecast, history, gns3, capacity, alert, drift, audit });
+            };
+
+            const sendEmailAlert = async () => {
+                const response = await fetch('/api/alerts/email', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                return response.json();
             };
 
             // Generate Config
@@ -661,6 +739,7 @@
                                         pathFinder={pathFinder}
                                         setPathFinder={setPathFinder}
                                         runPathFinder={runPathFinder}
+                                        runAutoReroute={runAutoReroute}
                                     />
                                 )}
 
@@ -682,7 +761,7 @@
                                 )}
 
                                 {activeTab === 'advanced' && (
-                                    <AdvancedTab data={advancedData} refresh={fetchAdvancedData} auth={auth} login={login} liveStatus={liveStatus} />
+                                    <AdvancedTab data={advancedData} refresh={fetchAdvancedData} auth={auth} login={login} liveStatus={liveStatus} sendEmailAlert={sendEmailAlert} />
                                 )}
                             </div>
                         </div>
@@ -699,7 +778,7 @@
                                         </div>
                                         <div>
                                             <h3 className="font-bold text-sm text-slate-100">Antigravity AI Network Diagnostics</h3>
-                                            <p className="text-xs text-slate-400">Confidence Score: <strong className="text-emerald-400">{aiDiagnostics.ai_confidence}%</strong></p>
+                                            <p className="text-xs text-slate-400">Confidence Score: <strong className="text-emerald-400">{aiDiagnostics.ai_confidence}%</strong> <span className="ml-2 text-[10px] text-cyan-300"><i className="fa-solid fa-circle text-[6px] mr-1"></i>LIVE ANALYSIS</span></p>
                                         </div>
                                     </div>
                                     <button onClick={() => setIsAiModalOpen(false)} className="text-slate-400 hover:text-slate-200">
@@ -711,6 +790,34 @@
                                         <div className="font-bold text-base mb-1">{aiDiagnostics.health_status}</div>
                                         <div>{aiDiagnostics.status_text}</div>
                                     </div>
+
+                                    {copilotInsights && (
+                                        <div>
+                                            <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Operational Intelligence</h4>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <div className="p-3 glass-card rounded-lg border border-slate-800">
+                                                    <div className="text-[10px] text-slate-500 uppercase">Failure Forecast</div>
+                                                    <div className="text-lg font-bold text-amber-300">{copilotInsights.forecast.predictions.length}</div>
+                                                    <div className="text-[10px] text-slate-400">assets at risk</div>
+                                                </div>
+                                                <div className="p-3 glass-card rounded-lg border border-slate-800">
+                                                    <div className="text-[10px] text-slate-500 uppercase">Network Risk</div>
+                                                    <div className="text-lg font-bold text-cyan-300">{copilotInsights.insights.risk_score}/100</div>
+                                                    <div className="text-[10px] text-slate-400">{copilotInsights.insights.hotspot_count} hotspot(s)</div>
+                                                </div>
+                                                <div className="p-3 glass-card rounded-lg border border-slate-800">
+                                                    <div className="text-[10px] text-slate-500 uppercase">Config Drift</div>
+                                                    <div className="text-lg font-bold text-purple-300">{copilotInsights.drift.drift_percentage}%</div>
+                                                    <div className="text-[10px] text-slate-400">{copilotInsights.drift.changed_fields} changed field(s)</div>
+                                                </div>
+                                                <div className="p-3 glass-card rounded-lg border border-slate-800">
+                                                    <div className="text-[10px] text-slate-500 uppercase">Capacity Plan</div>
+                                                    <div className="text-lg font-bold text-rose-300">{copilotInsights.capacity.upgrade_count}</div>
+                                                    <div className="text-[10px] text-slate-400">link upgrade(s) advised</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
 
                                     <div>
                                         <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Detected SLA Anomalies</h4>
@@ -868,27 +975,28 @@
                                     {/* Link Telemetry Tag */}
                                     <g transform={`translate(${midX}, ${midY})`}>
                                         <rect 
-                                            x="-35" y="-10" width="70" height="20" rx="6" 
+                                            x="-50" y="-10" width="100" height="20" rx="6" 
                                             fill="#0f172a" 
                                             stroke={strokeColor}
                                             strokeWidth="1"
                                             opacity="0.9"
                                         />
-                                        <text x="0" y="3" textAnchor="middle" fill="#94a3b8" fontSize="9" className="code-font font-medium">
-                                            {isDown ? 'DOWN' : `${link.latency}ms | ${link.utilization}%`}
+                                        <text x="0" y="3" textAnchor="middle" fill="#94a3b8" fontSize="8" className="code-font font-medium">
+                                            {isDown ? 'DOWN' : `${link.utilization}% | ${link.throughput} Mbps`}
                                         </text>
                                     </g>
 
                                     {/* Animated Traffic Packets on Active Links */}
-                                    {!isDown && (
-                                        <circle r="3.5" fill={isPath ? '#f43f5e' : '#00f2fe'}>
-                                            <animateMotion 
+                                    {!isDown && Array.from({ length: Math.max(1, Math.min(5, Math.ceil(link.utilization / 20))) }).map((_, packetIndex) => (
+                                        <circle key={`${link.id}-packet-${packetIndex}`} r={isCongested ? 4 : 3.5} fill={isPath ? '#f43f5e' : isCongested ? '#fbbf24' : '#00f2fe'}>
+                                            <animateMotion
                                                 path={`M ${sourceNode.x} ${sourceNode.y} L ${targetNode.x} ${targetNode.y}`}
-                                                dur={`${Math.max(0.6, 3.0 - (link.utilization/30.0))}s`}
+                                                begin={`${packetIndex * -0.35}s`}
+                                                dur={`${Math.max(0.55, 3.2 - (link.utilization / 28.0))}s`}
                                                 repeatCount="indefinite"
                                             />
                                         </circle>
-                                    )}
+                                    ))}
                                 </g>
                             );
                         })}
@@ -1107,7 +1215,7 @@
         }
 
         // What-If Simulator Component
-        function SimulatorTab({ nodes, links, triggerFailure, pathFinder, setPathFinder, runPathFinder }) {
+        function SimulatorTab({ nodes, links, triggerFailure, pathFinder, setPathFinder, runPathFinder, runAutoReroute }) {
             return (
                 <div className="space-y-4 text-xs">
                     <div className="p-4 glass-card rounded-xl border border-slate-800 space-y-3">
@@ -1185,6 +1293,12 @@
                             >
                                 Compute Optimal Path
                             </button>
+                            <button
+                                onClick={runAutoReroute}
+                                className="w-full py-2 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/40 text-amber-200 font-semibold rounded-lg"
+                            >
+                                <i className="fa-solid fa-shuffle mr-2"></i>Auto Reroute Around Congestion
+                            </button>
                         </div>
 
                         {pathFinder.result && (
@@ -1193,6 +1307,7 @@
                                     <>
                                         <div className="text-emerald-400 font-bold">Path Calculated Successfully</div>
                                         <div>Hops: {pathFinder.result.hop_count} | Latency: {pathFinder.result.total_latency_ms}ms</div>
+                                        {pathFinder.result.max_path_utilization !== undefined && <div>Max utilization: {pathFinder.result.max_path_utilization}% {pathFinder.result.rerouted ? '| Rerouted' : '| Existing path retained'}</div>}
                                         <div className="text-slate-400 text-[11px] truncate">
                                             Route: {pathFinder.result.path_nodes.join(" ➔ ")}
                                         </div>
@@ -1271,10 +1386,11 @@
             );
         }
 
-        function AdvancedTab({ data, refresh, auth, login, liveStatus }) {
+        function AdvancedTab({ data, refresh, auth, login, liveStatus, sendEmailAlert }) {
             const [username, setUsername] = useState('viewer');
             const [password, setPassword] = useState('viewer123');
             const [loginMessage, setLoginMessage] = useState('');
+            const [emailStatus, setEmailStatus] = useState('');
 
             const handleLogin = async event => {
                 event.preventDefault();
@@ -1345,7 +1461,14 @@
 
                     <div className="p-3 glass-card rounded-lg border border-slate-800 text-xs">
                         <div className="font-bold text-slate-200 mb-1">Alert Notification</div>
-                        <div className="text-[11px] text-slate-400">Teams payload ready. Set <span className="text-cyan-300 code-font">TEAMS_WEBHOOK_URL</span> on the server to deliver alerts.</div>
+                        <div className="text-[11px] text-slate-400">Teams payload preview ready. SMTP email requires server configuration.</div>
+                        <button onClick={async () => { const result = await sendEmailAlert(); setEmailStatus(result.success ? `Alert sent to ${result.recipient}` : result.message); }} className="mt-2 px-3 py-1.5 rounded bg-cyan-500/15 border border-cyan-400/30 text-cyan-200 text-[10px]">Send email alert</button>
+                        {emailStatus && <div className="mt-2 text-[10px] text-slate-400">{emailStatus}</div>}
+                    </div>
+
+                    <div className="p-3 glass-card rounded-lg border border-slate-800">
+                        <div className="flex items-center justify-between mb-2"><h4 className="text-xs font-bold text-slate-200">Audit Log</h4><span className="text-[10px] text-slate-500">{data.audit.events.length} recent</span></div>
+                        {data.audit.events.length === 0 ? <div className="text-[11px] text-slate-500">No actions recorded yet.</div> : <div className="space-y-2">{data.audit.events.slice(0, 5).map((event, index) => <div key={`${event.timestamp}-${index}`} className="text-[10px] border-l-2 border-cyan-500/50 pl-2"><div className="flex justify-between text-slate-300"><span>{event.action}</span><span>{new Date(event.timestamp * 1000).toLocaleTimeString()}</span></div><div className="text-slate-500">{event.username} · {event.details}</div></div>)}</div>}
                     </div>
                 </div>
             );

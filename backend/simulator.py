@@ -2,6 +2,7 @@ import heapq
 import random
 import time
 import math
+from collections import deque
 from typing import Dict, List, Any, Optional
 
 class NetworkSimulator:
@@ -23,6 +24,34 @@ class NetworkSimulator:
         self.links.clear()
         self.active_traffic_flows.clear()
         self.incidents_log.clear()
+
+    def export_topology(self) -> Dict[str, Any]:
+        return {
+            "active_template": self.active_template,
+            "digital_twin_mode": self.digital_twin_mode,
+            "nodes": list(self.nodes.values()),
+            "links": list(self.links.values())
+        }
+
+    def import_topology(self, topology: Dict[str, Any]) -> Dict[str, Any]:
+        nodes = topology.get("nodes", [])
+        links = topology.get("links", [])
+        if not isinstance(nodes, list) or not isinstance(links, list):
+            raise ValueError("Topology nodes and links must be arrays")
+
+        node_ids = {node.get("id") for node in nodes}
+        if any(not node.get("id") or not node.get("name") for node in nodes):
+            raise ValueError("Every node requires id and name")
+        if any(not link.get("id") or link.get("source") not in node_ids or link.get("target") not in node_ids for link in links):
+            raise ValueError("Every link requires valid source and target nodes")
+
+        self.nodes = {node["id"]: node for node in nodes}
+        self.links = {link["id"]: link for link in links}
+        self.active_template = topology.get("active_template", "imported_topology")
+        self.digital_twin_mode = topology.get("digital_twin_mode", "ISOLATED_SANDBOX")
+        self.update_routing_tables()
+        self.log_incident("INFO", f"Imported topology with {len(self.nodes)} nodes and {len(self.links)} links.")
+        return {"nodes": len(self.nodes), "links": len(self.links)}
 
     def add_node(self, node_id: str, name: str, node_type: str, ip: str, x: float = 0, y: float = 0, config: Optional[Dict] = None):
         self.nodes[node_id] = {
@@ -289,6 +318,41 @@ class NetworkSimulator:
             "estimated_loss_percent": round(total_loss, 2),
             "hop_count": len(path_nodes) - 1
         }
+
+    def bfs_connectivity(self, source_id: str, target_id: str) -> Dict[str, Any]:
+        """Check reachability using an unweighted breadth-first traversal."""
+        if source_id not in self.nodes or target_id not in self.nodes:
+            return {"reachable": False, "reason": "Invalid node ID", "path": []}
+        if self.nodes[source_id]["status"] == "failed" or self.nodes[target_id]["status"] == "failed":
+            return {"reachable": False, "reason": "Source or target node is down", "path": []}
+
+        adjacency = {node_id: [] for node_id in self.nodes}
+        for link in self.links.values():
+            if link["status"] == "down":
+                continue
+            adjacency[link["source"]].append(link["target"])
+            adjacency[link["target"]].append(link["source"])
+
+        queue = deque([source_id])
+        previous = {source_id: None}
+        while queue:
+            current = queue.popleft()
+            if current == target_id:
+                break
+            for neighbor in adjacency[current]:
+                if neighbor not in previous and self.nodes[neighbor]["status"] != "failed":
+                    previous[neighbor] = current
+                    queue.append(neighbor)
+
+        if target_id not in previous:
+            return {"reachable": False, "reason": "Destination unreachable", "path": []}
+        path = []
+        current = target_id
+        while current is not None:
+            path.append(current)
+            current = previous[current]
+        path.reverse()
+        return {"reachable": True, "path": path, "hop_count": len(path) - 1}
 
     def inject_failure(self, failure_type: str, target_id: str, intensity: float = 1.0) -> Dict[str, Any]:
         """
